@@ -44,8 +44,21 @@ struct character
     uint32 Advance;
 };
 
+
+static constexpr int32 MAX_CHARACTERS_TO_LOAD = 128;
+static constexpr int32 MAX_TEXT_BUFFER = 1028;
+
 static bool Running;
 static bool ShouldRender;
+
+static int32 DrawableWidth;
+static int32 DrawableHeight;
+
+static float MaxFontHeight;
+
+static char* TextToRender;
+static char* TextToRenderEnd;
+static int32 TextSize;
 
 // Triangle stuff
 static uint32 Vao;
@@ -144,6 +157,18 @@ static void InitializeSimpleTriangle()
 
 static void InitializeSimpleText()
 {
+    
+    // NOTE(Naor): Initialize the global text
+    TextToRender = new char[MAX_TEXT_BUFFER];
+    TextToRenderEnd = TextToRender;
+    
+    for(int32 Index = 0;
+        Index < MAX_TEXT_BUFFER;
+        ++Index)
+    {
+        TextToRender[Index] = 0;
+    }
+    
     int32 Error = FT_Init_FreeType(&FontLibrary);
     if(Error == 0)
     {
@@ -167,7 +192,7 @@ static void InitializeSimpleText()
             // char into a texture itself.
             glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
             for(uint32 Char = 0;
-                Char < 128;
+                Char < MAX_CHARACTERS_TO_LOAD;
                 ++Char)
             {
                 if(FT_Load_Char(FontFace, Char, FT_LOAD_RENDER) != 0)
@@ -201,6 +226,9 @@ static void InitializeSimpleText()
                 Character.Size = {(int32)FontFace->glyph->bitmap.width, (int32)FontFace->glyph->bitmap.rows};
                 Character.Bearing = {FontFace->glyph->bitmap_left, FontFace->glyph->bitmap_top};
                 Character.Advance = FontFace->glyph->advance.x;
+                
+                if((float)Character.Size.Y > MaxFontHeight)
+                    MaxFontHeight = (float)Character.Size.Y;
                 
                 Characters.insert(std::pair<char, character>((char)Char, Character));
             }
@@ -299,18 +327,18 @@ static void Render()
     glActiveTexture(GL_TEXTURE0);
     glBindVertexArray(Vao);
     
-    float X = 100.0f;
-    float Y = 100.0f;
-    const char* TextToRender = "Hello world!";
-    while(*TextToRender)
+    float X = 0.0f;
+    float Y = (float)DrawableHeight - MaxFontHeight;
+    const char* Scan = TextToRender;
+    while(*Scan)
     {
-        character Char = Characters[*TextToRender];
+        character Char = Characters[*Scan];
         
         float XPos = X + Char.Bearing.X; // * Scale
         float YPos = Y - (Char.Size.Y - Char.Bearing.Y); // * Scale
         
-        float Width = 1.0f * Char.Size.X; // * Scale
-        float Height = 1.0f * Char.Size.Y; // * Scale
+        float Width = (float)Char.Size.X; // * Scale
+        float Height = (float)Char.Size.Y; // * Scale
         
         float Vertices[6][4] = {
             {XPos, YPos + Height, 0.0f, 0.0f},
@@ -331,7 +359,7 @@ static void Render()
         
         X += (Char.Advance >> 6); // * Scale
         
-        TextToRender++;
+        Scan++;
     }
 }
 
@@ -389,6 +417,8 @@ int main(int argc, char* argv[])
         return 1;
     }
     
+    SDL_GL_GetDrawableSize(Window, &DrawableWidth, &DrawableHeight);
+    
     //InitializeSimpleTriangle();
     InitializeSimpleText();
     
@@ -403,13 +433,31 @@ int main(int argc, char* argv[])
             switch(Event.type)
             {
                 case SDL_KEYDOWN:
-                case SDL_KEYUP:
+                //case SDL_KEYUP:
                 {
                     SDL_KeyboardEvent& key = Event.key;
                     if(key.keysym.scancode == SDL_SCANCODE_ESCAPE)
                     {
                         Running = false;
                     }
+                    
+                    if(key.keysym.scancode == SDL_SCANCODE_BACKSPACE)
+                    {
+                        if(TextSize > 0)
+                        {
+                            *(--TextToRenderEnd) = 0;
+                            TextSize--;
+                        }
+                    }
+                    else if(key.keysym.sym > 0 && key.keysym.sym < MAX_CHARACTERS_TO_LOAD)
+                    {
+                        if(TextSize < MAX_TEXT_BUFFER)
+                        {
+                            *TextToRenderEnd++ = (char)key.keysym.sym;
+                            TextSize++;
+                        }
+                    }
+                    
                     
                 }break;
                 

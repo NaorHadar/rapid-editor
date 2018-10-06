@@ -60,12 +60,10 @@ static char* TextToRender;
 static char* TextToRenderEnd;
 static int32 TextSize;
 
-// Triangle stuff
+// NOTE(Naor): Temp stuff for testing a simple text
 static uint32 Vao;
 static uint32 Vbo;
 static uint32 ShaderProgram;
-
-// Font stuff
 static FT_Library FontLibrary;
 static FT_Face FontFace;
 
@@ -117,44 +115,6 @@ static void CompileShaderProgram(const char* VertexSource, const char* FragmentS
     glDeleteShader(FragmentShader);
 }
 
-static void InitializeSimpleTriangle()
-{
-    // NOTE(Naor): Setup the triangle buffer
-    glGenVertexArrays(1, &Vao);
-    glGenBuffers(1, &Vbo);
-    
-    glBindVertexArray(Vao);
-    
-    // NOTE(Naor): 1.0 is top for OpenGL
-    static float Vertices[] = {
-        0.0f, 1.0f, 0.0f,
-        -1.0f, -1.0f, 0.0f,
-        1.0f, -1.0f, 0.0f,
-    };
-    
-    glBindBuffer(GL_ARRAY_BUFFER, Vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(Vertices), Vertices, GL_STATIC_DRAW);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), 0);
-    glEnableVertexAttribArray(0);
-    
-    // NOTE(Naor): Setup the program for the triangle
-    const char* VertexSource = "#version 330 core\n"
-        "layout (location = 0) in vec3 aPos;\n"
-        "void main()\n"
-        "{\n"
-        "   gl_Position = vec4(aPos.x, aPos.y, aPos.z, 1.0);\n"
-        "}\0";
-    const char* FragmentSource = "#version 330 core\n"
-        "out vec4 FragColor;\n"
-        "uniform vec3 RandomValue;"
-        "void main()\n"
-        "{\n"
-        "   FragColor = vec4(RandomValue, 1.0f);\n"
-        "}\n\0";
-    
-    CompileShaderProgram(VertexSource, FragmentSource);
-}
-
 static void InitializeSimpleText()
 {
     
@@ -178,14 +138,14 @@ static void InitializeSimpleText()
         // NOTE(Naor): To know how many faces a given font file contains,
         // set face_index to -1, then check the value of face->num_faces,
         // which indicates how many faces are embedded in the font file.
-        Error = FT_New_Face(FontLibrary, "C:/Windows/Fonts/Arial.ttf", 0, &FontFace);
+        Error = FT_New_Face(FontLibrary, "OpenSans-Regular.ttf", 0, &FontFace);
         if(Error == 0)
         {
             // NOTE(Naor): Or use FT_Set_Char_Size
             Error = FT_Set_Pixel_Sizes(
                 FontFace,   /* handle to face object */
                 0,      /* pixel_width           */
-                48 );   /* pixel_height          */
+                18);   /* pixel_height          */
             
             
             // TODO(Naor): Make this into a single bitmap instead of every single
@@ -256,7 +216,7 @@ static void InitializeSimpleText()
                 "void main()\n"
                 "{    \n"
                 "vec4 Sampled = vec4(1.0, 1.0, 1.0, texture(Text, TexCoords).r);\n"
-                "Color = vec4(0.5, 0.6, 0.3, 1.0) * Sampled;\n"
+                "Color = vec4(0.56, 0.69, 0.5, 1.0) * Sampled;\n"
                 "}  \n";
             
             CompileShaderProgram(VertexSource, FragmentSource);
@@ -303,7 +263,7 @@ static void InitializeSimpleText()
 
 static void Render()
 {
-    glClearColor(0.4f, 0.2f, 0.5f, 1.0f);
+    glClearColor(0.047f, 0.047f, 0.047f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
     
 #if 0
@@ -419,7 +379,6 @@ int main(int argc, char* argv[])
     
     SDL_GL_GetDrawableSize(Window, &DrawableWidth, &DrawableHeight);
     
-    //InitializeSimpleTriangle();
     InitializeSimpleText();
     
     Running = true;
@@ -436,12 +395,12 @@ int main(int argc, char* argv[])
                 //case SDL_KEYUP:
                 {
                     SDL_KeyboardEvent& key = Event.key;
-                    if(key.keysym.scancode == SDL_SCANCODE_ESCAPE)
+                    if(key.keysym.sym == SDLK_ESCAPE)
                     {
                         Running = false;
                     }
                     
-                    if(key.keysym.scancode == SDL_SCANCODE_BACKSPACE)
+                    if(key.keysym.sym == SDLK_BACKSPACE)
                     {
                         if(TextSize > 0)
                         {
@@ -453,11 +412,19 @@ int main(int argc, char* argv[])
                     {
                         if(TextSize < MAX_TEXT_BUFFER)
                         {
-                            *TextToRenderEnd++ = (char)key.keysym.sym;
+                            char CharToAdd = (char)key.keysym.sym;
+                            // TODO(Naor): Add Capslock, and figure out a better way to convert
+                            // characters to their shift variant.
+                            if(key.keysym.mod & (KMOD_LSHIFT | KMOD_RSHIFT))
+                            {
+                                if(CharToAdd >= 'a' && CharToAdd <= 'z')
+                                    CharToAdd -= 'a' - 'A';
+                            }
+                            
+                            *TextToRenderEnd++ = CharToAdd;
                             TextSize++;
                         }
                     }
-                    
                     
                 }break;
                 

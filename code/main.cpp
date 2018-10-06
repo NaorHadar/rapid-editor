@@ -243,22 +243,18 @@ static void InitializeSimpleText()
         }
         else
         {
-            // TODO(Naor): Log error
-            // Couldn't load the given font.
+            OutputDebugString("Couldn't load the given font.");
         }
     }
     else
     {
-        // TODO(Naor): Log error
-        // Couldn't initialize freetype.
+        OutputDebugString("Couldn't initialize freetype.");
     }
-    
-    // We are dont with the font.
-    FT_Done_Face(FontFace);
     
     // TODO(Naor): Do we really want to tell FreeType that we are done with it?
     // maybe we would like to load fonts on the fly and reloading it would be a waste.
     // (We will probably wont be loading fonts that often so maybe we should free it)
+    FT_Done_Face(FontFace);
 }
 
 static void Render()
@@ -292,7 +288,16 @@ static void Render()
     const char* Scan = TextToRender;
     while(*Scan)
     {
-        character Char = Characters[*Scan];
+        // TODO(Naor): Check if this is ok for other platforms
+        if(*Scan == '\r')
+        {
+            X = 0.0f;
+            Y -= MaxFontHeight;
+            Scan++;
+            continue;
+        }
+        
+        character Char = Characters[*Scan++];
         
         float XPos = X + Char.Bearing.X; // * Scale
         float YPos = Y - (Char.Size.Y - Char.Bearing.Y); // * Scale
@@ -318,8 +323,6 @@ static void Render()
         glDrawArrays(GL_TRIANGLES, 0, 6);
         
         X += (Char.Advance >> 6); // * Scale
-        
-        Scan++;
     }
 }
 
@@ -418,7 +421,10 @@ int main(int argc, char* argv[])
                             if(key.keysym.mod & (KMOD_LSHIFT | KMOD_RSHIFT))
                             {
                                 if(CharToAdd >= 'a' && CharToAdd <= 'z')
-                                    CharToAdd -= 'a' - 'A';
+                                {
+                                    // TODO(Naor): Make this compile time number.
+                                    CharToAdd -= 'a' - 'A'; 
+                                }
                             }
                             
                             *TextToRenderEnd++ = CharToAdd;

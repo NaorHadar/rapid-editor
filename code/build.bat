@@ -10,6 +10,6 @@ set AddLibsx64=-LIBPATH:..\deps\SDL\VisualC\x64\Release -LIBPATH:..\deps\freetyp
 IF NOT EXIST ..\build mkdir ..\build
 pushd ..\build
 
-cl %CommonCompilerFlags% %CommonIncludeFlags% ..\code\main.cpp /link -subsystem:windows %AddLibsx64% %AddLibsx64% %CommonLinkerFlags%
+cl %CommonCompilerFlags% %CommonIncludeFlags% ..\code\win32_main.cpp /link -subsystem:windows %AddLibsx64% %CommonLinkerFlags%
 
 popd

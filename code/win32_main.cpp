@@ -1,6 +1,6 @@
 #include <gl3w.c>
 #include <SDL.h>
-#include <iostream>
+#include <windows.h>
 #include <cstdint>
 #include <unordered_map>
 
@@ -16,6 +16,11 @@ using uint16 = uint16_t;
 using uint32 = uint32_t;
 using uint64 = uint64_t;
 using bool32 = int32_t;
+
+#include "platform.h"
+#include "memory.h"
+#include "utility.h"
+#include "auto_complete_tree.h"
 
 struct ivec2
 {
@@ -60,12 +65,22 @@ static char* TextToRender;
 static char* TextToRenderEnd;
 static int32 TextSize;
 
+// Features
+static bool RequestNewAutoComplete;
+static std::vector<std::string> LastCompletedWords;
+static int32 LastCompletedWordsIndex;
+static std::string LastSearchedWord;
+
+
 // NOTE(Naor): Temp stuff for testing a simple text
 static uint32 Vao;
 static uint32 Vbo;
 static uint32 ShaderProgram;
 static FT_Library FontLibrary;
 static FT_Face FontFace;
+
+// NOTE(Naor): This is grabbed from the global scope (extern)
+platform_api Platform;
 
 // TODO(Naor): Do we really want it to be unordered_map? 
 // maybe we want to access it with an index because all the characters
@@ -326,8 +341,30 @@ static void Render()
     }
 }
 
+// TODO(Naor): Those are really simple allocations for now,
+// we need to align them and find a proper size based on the pages.
+PLATFORM_ALLOCATE_MEMORY(Win32AllocateMemory)
+{
+    void* Result = VirtualAlloc(0, Size, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
+    
+    return Result;
+}
+
+PLATFORM_DEALLOCATE_MEMORY(Win32DeallocateMemory)
+{
+    VirtualFree(Block, 0, MEM_RELEASE);
+}
+
+static void Win32InitializePlatform()
+{
+    Platform.AllocateMemory = Win32AllocateMemory;
+    Platform.DeallocateMemory = Win32DeallocateMemory;
+}
+
 int main(int argc, char* argv[])
 {
+    Win32InitializePlatform();
+    
     SDL_Window* Window;
     SDL_GLContext GLContext;
     
@@ -382,7 +419,11 @@ int main(int argc, char* argv[])
     
     SDL_GL_GetDrawableSize(Window, &DrawableWidth, &DrawableHeight);
     
+    // Initializing everything
     InitializeSimpleText();
+    
+    auto_complete_tree AutoComplete;
+    AutoComplete.Initialize();
     
     Running = true;
     ShouldRender = true;
@@ -398,12 +439,63 @@ int main(int argc, char* argv[])
                 //case SDL_KEYUP:
                 {
                     SDL_KeyboardEvent& key = Event.key;
+                    // If we press something other than tab, we need a
+                    // new autocomplete list
+                    if(key.keysym.sym != SDLK_TAB)
+                    {
+                        RequestNewAutoComplete = true;
+                    }
+                    
                     if(key.keysym.sym == SDLK_ESCAPE)
                     {
                         Running = false;
                     }
                     
-                    if(key.keysym.sym == SDLK_BACKSPACE)
+                    if(key.keysym.sym == SDLK_TAB)
+                    {
+                        if(RequestNewAutoComplete)
+                        {
+                            // TODO(Naor): Move this to a utility function
+                            char* Scan = TextToRenderEnd;
+                            while(Scan != TextToRender && *(Scan-1) != ' ' && *(Scan-1) != '\r')
+                            {
+                                --Scan;
+                            }
+                            
+                            LastSearchedWord = "";
+                            LastSearchedWord.reserve(TextToRenderEnd - Scan);
+                            while(Scan != TextToRenderEnd)
+                            {
+                                LastSearchedWord.push_back(*Scan++);
+                            }
+                            
+                            LastCompletedWords = AutoComplete.Get(LastSearchedWord);
+                            LastCompletedWordsIndex = 0;
+                        }
+                        
+                        // We want to check again if the list is not empty
+                        if(!LastCompletedWords.empty())
+                        {
+                            std::string NextWord = LastCompletedWords[LastCompletedWordsIndex];
+                            size_t StartIndex = LastSearchedWord.size();
+                            
+                            for(size_t NextWordIndex = StartIndex;
+                                NextWordIndex < NextWord.size(); 
+                                ++NextWordIndex)
+                            {
+                                ++TextSize;
+                                *TextToRenderEnd++ = NextWord[NextWordIndex];
+                            }
+                            
+                            LastCompletedWordsIndex++;
+                            if(LastCompletedWordsIndex >= LastCompletedWords.size())
+                            {
+                                LastCompletedWordsIndex = 0;
+                            }
+                        }
+                        
+                    }
+                    else if(key.keysym.sym == SDLK_BACKSPACE)
                     {
                         if(TextSize > 0)
                         {
@@ -413,9 +505,32 @@ int main(int argc, char* argv[])
                     }
                     else if(key.keysym.sym > 0 && key.keysym.sym < MAX_CHARACTERS_TO_LOAD)
                     {
+                        // TODO(Naor): Remove this and add a dynamically sized buffer
                         if(TextSize < MAX_TEXT_BUFFER)
                         {
                             char CharToAdd = (char)key.keysym.sym;
+                            
+                            // TODO(Naor): Add other signs for this to work proparly (; for example)
+                            if(CharToAdd == ' ' || CharToAdd == '\r')
+                            {
+                                // TODO(Naor): Move this to a utility function
+                                std::string NewWord;
+                                char* Scan = TextToRenderEnd;
+                                while(Scan != TextToRender && *(Scan-1) != ' ' && *(Scan-1) != '\r')
+                                {
+                                    --Scan;
+                                }
+                                
+                                NewWord.reserve(TextToRenderEnd - Scan);
+                                while(Scan != TextToRenderEnd)
+                                {
+                                    NewWord.push_back(*Scan++);
+                                }
+                                
+                                AutoComplete.Add(NewWord);
+                                
+                            }
+                            
                             // TODO(Naor): Add Capslock, and figure out a better way to convert
                             // characters to their shift variant.
                             if(key.keysym.mod & (KMOD_LSHIFT | KMOD_RSHIFT))

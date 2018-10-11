@@ -7,12 +7,12 @@
 #include <ft2build.h>
 #include FT_FREETYPE_H
 
-#include "types.h"
-#include "rapid_math.h"
-#include "platform.h"
-#include "memory.h"
-#include "utility.h"
-#include "auto_complete_tree.h"
+#include "re_types.h"
+#include "re_math.h"
+#include "re_platform.h"
+#include "re_memory.h"
+#include "re_utility.h"
+#include "re_autocomplete.h"
 
 // TODO(Naor): Move all these globals above #include "text_buffer.h" to
 // a struct or another place. this is temporary place for them
@@ -45,8 +45,8 @@ static int32 DrawableHeight;
 static std::unordered_map<char, character> Characters;
 
 
-#include "text_buffer.h"
-#include "panel.h"
+#include "re_text_buffer.h"
+#include "re_panel.h"
 
 static bool Running;
 static bool ShouldRender;

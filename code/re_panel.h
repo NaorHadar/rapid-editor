@@ -1,6 +1,6 @@
 #pragma once
 
-#include "text_buffer.h"
+#include "re_text_buffer.h"
 
 // TODO(Naor): Currently, we treat a panel as the entire window,
 // add a viewport to each panel and render only to it.

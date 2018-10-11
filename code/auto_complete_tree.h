@@ -16,6 +16,10 @@ struct auto_complete_node
     std::vector<std::string> Words;
 };
 
+// TODO(Naor): Make the algorithm remember the word used in a list,
+// and use it more often. (For example if there is A and AB, and the autocomplete
+// returns A, but the user uses AB (after another tab), the autocomplete will return AB first
+// instead of A. ****(Maybe give a timer when the word was last used, and use the latest one)
 // TODO(Naor): Implement the remove functionality.
 struct auto_complete_tree
 {

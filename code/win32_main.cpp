@@ -7,80 +7,36 @@
 #include <ft2build.h>
 #include FT_FREETYPE_H
 
-using int8 = int8_t;
-using int16 = int16_t;
-using int32 = int32_t;
-using int64 = int64_t;
-using uint8 = uint8_t;
-using uint16 = uint16_t;
-using uint32 = uint32_t;
-using uint64 = uint64_t;
-using bool32 = int32_t;
-
+#include "types.h"
+#include "rapid_math.h"
 #include "platform.h"
 #include "memory.h"
 #include "utility.h"
 #include "auto_complete_tree.h"
 
-struct ivec2
-{
-    int32 X;
-    int32 Y;
-};
-
-struct vec4
-{
-    float X;
-    float Y;
-    float Z;
-    float W;
-};
-
-struct m4
-{
-    float E[4][4];
-};
-
-struct character
-{
-    uint32 TextureID;
-    ivec2 Size;
-    ivec2 Bearing;
-    uint32 Advance;
-};
-
+// TODO(Naor): Move all these globals above #include "text_buffer.h" to
+// a struct or another place. this is temporary place for them
+// just to make everything work until I refactor the code.
 
 static constexpr int32 MAX_CHARACTERS_TO_LOAD = 128;
 static constexpr int32 MAX_TEXT_BUFFER = 1028;
 
-static bool Running;
-static bool ShouldRender;
-
-static int32 DrawableWidth;
-static int32 DrawableHeight;
-
-static float MaxFontHeight;
-
-static char* TextToRender;
-static char* TextToRenderEnd;
-static int32 TextSize;
-
-// Features
+static auto_complete_tree AutoComplete;
 static bool RequestNewAutoComplete;
 static std::vector<std::string> LastCompletedWords;
 static int32 LastCompletedWordsIndex;
 static std::string LastSearchedWord;
 
-
-// NOTE(Naor): Temp stuff for testing a simple text
 static uint32 Vao;
 static uint32 Vbo;
 static uint32 ShaderProgram;
 static FT_Library FontLibrary;
 static FT_Face FontFace;
 
-// NOTE(Naor): This is grabbed from the global scope (extern)
-platform_api Platform;
+static float MaxFontHeight;
+
+static int32 DrawableWidth;
+static int32 DrawableHeight;
 
 // TODO(Naor): Do we really want it to be unordered_map? 
 // maybe we want to access it with an index because all the characters
@@ -88,20 +44,15 @@ platform_api Platform;
 // and check if they are in the correct range.
 static std::unordered_map<char, character> Characters;
 
-// NOTE(Naor): Thanks to GLM.
-m4 OrthographicProjection(float Left, float Right, float Bottom, float Top)
-{
-    m4 Result = {};
-    Result.E[3][3] = 1.0f;
-    
-    Result.E[0][0] = 2.0f / (Right - Left);
-    Result.E[1][1] = 2.0f / (Top - Bottom);
-    Result.E[2][2] = -1.0f;
-    Result.E[3][0] = - (Right + Left) / (Right - Left);
-    Result.E[3][1] = - (Top + Bottom) / (Top - Bottom);
-    
-    return Result;
-}
+
+#include "text_buffer.h"
+#include "panel.h"
+
+static bool Running;
+static bool ShouldRender;
+
+// NOTE(Naor): This is grabbed from the global scope (extern)
+platform_api Platform;
 
 static void CompileShaderProgram(const char* VertexSource, const char* FragmentSource)
 {
@@ -132,18 +83,6 @@ static void CompileShaderProgram(const char* VertexSource, const char* FragmentS
 
 static void InitializeSimpleText()
 {
-    
-    // NOTE(Naor): Initialize the global text
-    TextToRender = new char[MAX_TEXT_BUFFER];
-    TextToRenderEnd = TextToRender;
-    
-    for(int32 Index = 0;
-        Index < MAX_TEXT_BUFFER;
-        ++Index)
-    {
-        TextToRender[Index] = 0;
-    }
-    
     int32 Error = FT_Init_FreeType(&FontLibrary);
     if(Error == 0)
     {
@@ -272,75 +211,6 @@ static void InitializeSimpleText()
     FT_Done_Face(FontFace);
 }
 
-static void Render()
-{
-    glClearColor(0.047f, 0.047f, 0.047f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
-    
-#if 0
-    // Triangle rendering
-    glBindVertexArray(Vao);
-    glUseProgram(ShaderProgram);
-    
-    float RandomValue[3] = {
-        (rand() % 255) / 255.0f,
-        (rand() % 255) / 255.0f,
-        (rand() % 255) / 255.0f
-    };
-    
-    glUniform3fv(glGetUniformLocation(ShaderProgram, "RandomValue"), 1, RandomValue);
-    glDrawArrays(GL_TRIANGLES, 0, 3);
-#endif
-    
-    glUseProgram(ShaderProgram);
-    // NOTE(Naor): This might not be neccessary, Texture0 should be
-    // active by default.
-    glActiveTexture(GL_TEXTURE0);
-    glBindVertexArray(Vao);
-    
-    float X = 0.0f;
-    float Y = (float)DrawableHeight - MaxFontHeight;
-    const char* Scan = TextToRender;
-    while(*Scan)
-    {
-        // TODO(Naor): Check if this is ok for other platforms
-        if(*Scan == '\r')
-        {
-            X = 0.0f;
-            Y -= MaxFontHeight;
-            Scan++;
-            continue;
-        }
-        
-        character Char = Characters[*Scan++];
-        
-        float XPos = X + Char.Bearing.X; // * Scale
-        float YPos = Y - (Char.Size.Y - Char.Bearing.Y); // * Scale
-        
-        float Width = (float)Char.Size.X; // * Scale
-        float Height = (float)Char.Size.Y; // * Scale
-        
-        float Vertices[6][4] = {
-            {XPos, YPos + Height, 0.0f, 0.0f},
-            {XPos, YPos, 0.0f, 1.0f},
-            {XPos + Width, YPos, 1.0f, 1.0f},
-            
-            {XPos, YPos + Height, 0.0f, 0.0f},
-            {XPos + Width, YPos, 1.0f, 1.0f},
-            {XPos + Width, YPos + Height, 1.0f, 0.0f},
-        };
-        
-        glBindTexture(GL_TEXTURE_2D, Char.TextureID);
-        glBindBuffer(GL_ARRAY_BUFFER, Vbo);
-        glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(Vertices), Vertices);
-        glBindBuffer(GL_ARRAY_BUFFER, 0);
-        
-        glDrawArrays(GL_TRIANGLES, 0, 6);
-        
-        X += (Char.Advance >> 6); // * Scale
-    }
-}
-
 // TODO(Naor): Those are really simple allocations for now,
 // we need to align them and find a proper size based on the pages.
 PLATFORM_ALLOCATE_MEMORY(Win32AllocateMemory)
@@ -361,11 +231,8 @@ static void Win32InitializePlatform()
     Platform.DeallocateMemory = Win32DeallocateMemory;
 }
 
-int main(int argc, char* argv[])
+bool32 Win32InitializeWindowAndOpenGL(SDL_Window** Window)
 {
-    Win32InitializePlatform();
-    
-    SDL_Window* Window;
     SDL_GLContext GLContext;
     
     // TODO(Naor): Validate this with if
@@ -378,16 +245,14 @@ int main(int argc, char* argv[])
     }
     
     // Create an application window with the following settings:
-    Window = SDL_CreateWindow(
+    *Window = SDL_CreateWindow(
         "An SDL2 window",                  // window title
         SDL_WINDOWPOS_UNDEFINED,           // initial x position
         SDL_WINDOWPOS_UNDEFINED,           // initial y position
         800,                               // width, in pixels
         600,                               // height, in pixels
-        SDL_WINDOW_OPENGL                  // flags - see below
+        SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE
         );
-    
-    
     
     // TODO(Naor): This attribute MUST come before the OpenGL context creation, 
     // the attributes are set and only when we use CreateContext it is applied.
@@ -396,17 +261,16 @@ int main(int argc, char* argv[])
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
     
-    GLContext = SDL_GL_CreateContext(Window);
-    SDL_GL_MakeCurrent(Window, GLContext);
+    GLContext = SDL_GL_CreateContext(*Window);
+    SDL_GL_MakeCurrent(*Window, GLContext);
     
     
-    if (Window == NULL) {
+    if (*Window == NULL) {
         char Buffer[256];
         sprintf(Buffer, "Could not create window: %s\n", SDL_GetError());
         OutputDebugString(Buffer);
         return 1;
     }
-    
     
     if (gl3wInit()) {
         OutputDebugString("failed to initialize OpenGL\n");
@@ -417,13 +281,40 @@ int main(int argc, char* argv[])
         return 1;
     }
     
-    SDL_GL_GetDrawableSize(Window, &DrawableWidth, &DrawableHeight);
+    SDL_GL_GetDrawableSize(*Window, &DrawableWidth, &DrawableHeight);
     
-    // Initializing everything
+    return 0;
+}
+
+int main(int argc, char* argv[])
+{
+    Win32InitializePlatform();
+    
+    SDL_Window* Window;
+    if(Win32InitializeWindowAndOpenGL(&Window) != 0)
+    {
+        // Something went wrong with initializing the window.
+        return 1;
+    }
+    
     InitializeSimpleText();
     
-    auto_complete_tree AutoComplete;
     AutoComplete.Initialize();
+    
+    std::vector<panel*> Panels;
+    panel* CurrentPanel;
+    
+    // NOTE(Naor): For now, we create only one panel, so this is
+    // enough.
+    CurrentPanel = new panel;
+    Panels.push_back(CurrentPanel);
+    
+    // NOTE(Naor): We also will create a simple text_buffer and assign
+    // it to our panel, until we will add file loading and creation of 
+    // new text buffers
+    text_buffer* TextBuffer = new text_buffer;
+    TextBuffer->Initialize();
+    CurrentPanel->TextBuffer = TextBuffer;
     
     Running = true;
     ShouldRender = true;
@@ -451,102 +342,18 @@ int main(int argc, char* argv[])
                         Running = false;
                     }
                     
+                    // TODO(Naor): Later on, move this into the panel
+                    // so it will handle it by its own.
                     if(key.keysym.sym == SDLK_TAB)
                     {
-                        if(RequestNewAutoComplete)
-                        {
-                            // TODO(Naor): Move this to a utility function
-                            char* Scan = TextToRenderEnd;
-                            while(Scan != TextToRender && *(Scan-1) != ' ' && *(Scan-1) != '\r')
-                            {
-                                --Scan;
-                            }
-                            
-                            LastSearchedWord = "";
-                            LastSearchedWord.reserve(TextToRenderEnd - Scan);
-                            while(Scan != TextToRenderEnd)
-                            {
-                                LastSearchedWord.push_back(*Scan++);
-                            }
-                            
-                            LastCompletedWords = AutoComplete.Get(LastSearchedWord);
-                            LastCompletedWordsIndex = 0;
-                        }
-                        
-                        // We want to check again if the list is not empty
-                        if(!LastCompletedWords.empty())
-                        {
-                            std::string NextWord = LastCompletedWords[LastCompletedWordsIndex];
-                            size_t StartIndex = LastSearchedWord.size();
-                            
-                            for(size_t NextWordIndex = StartIndex;
-                                NextWordIndex < NextWord.size(); 
-                                ++NextWordIndex)
-                            {
-                                ++TextSize;
-                                *TextToRenderEnd++ = NextWord[NextWordIndex];
-                            }
-                            
-                            LastCompletedWordsIndex++;
-                            if(LastCompletedWordsIndex >= LastCompletedWords.size())
-                            {
-                                LastCompletedWordsIndex = 0;
-                            }
-                        }
-                        
-                    }
-                    else if(key.keysym.sym == SDLK_BACKSPACE)
-                    {
-                        if(TextSize > 0)
-                        {
-                            *(--TextToRenderEnd) = 0;
-                            TextSize--;
-                        }
+                        CurrentPanel->GetAutoComplete();
                     }
                     else if(key.keysym.sym > 0 && key.keysym.sym < MAX_CHARACTERS_TO_LOAD)
                     {
-                        // TODO(Naor): Remove this and add a dynamically sized buffer
-                        if(TextSize < MAX_TEXT_BUFFER)
-                        {
-                            char CharToAdd = (char)key.keysym.sym;
-                            
-                            // TODO(Naor): Add other signs for this to work proparly (; for example)
-                            if(CharToAdd == ' ' || CharToAdd == '\r')
-                            {
-                                // TODO(Naor): Move this to a utility function
-                                std::string NewWord;
-                                char* Scan = TextToRenderEnd;
-                                while(Scan != TextToRender && *(Scan-1) != ' ' && *(Scan-1) != '\r')
-                                {
-                                    --Scan;
-                                }
-                                
-                                NewWord.reserve(TextToRenderEnd - Scan);
-                                while(Scan != TextToRenderEnd)
-                                {
-                                    NewWord.push_back(*Scan++);
-                                }
-                                
-                                AutoComplete.Add(NewWord);
-                                
-                            }
-                            
-                            // TODO(Naor): Add Capslock, and figure out a better way to convert
-                            // characters to their shift variant.
-                            if(key.keysym.mod & (KMOD_LSHIFT | KMOD_RSHIFT))
-                            {
-                                if(CharToAdd >= 'a' && CharToAdd <= 'z')
-                                {
-                                    // TODO(Naor): Make this compile time number.
-                                    CharToAdd -= 'a' - 'A'; 
-                                }
-                            }
-                            
-                            *TextToRenderEnd++ = CharToAdd;
-                            TextSize++;
-                        }
+                        char CharPressed = (char)key.keysym.sym;
+                        
+                        CurrentPanel->KeyPressed(CharPressed);
                     }
-                    
                 }break;
                 
                 case SDL_QUIT:
@@ -560,7 +367,10 @@ int main(int argc, char* argv[])
         {
             ShouldRender = false;
             
-            Render();
+            // TODO(Naor): We might want to render everything instead of just the current panel,
+            // for example, if two panels have the same text_buffer, and one panel is changing
+            // the buffer, we want to rerender both of them. (maybe render based on the text_buffer)
+            CurrentPanel->Render();
             
             SDL_GL_SwapWindow(Window);
         }

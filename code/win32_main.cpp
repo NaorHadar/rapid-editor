@@ -329,31 +329,37 @@ int main(int argc, char* argv[])
                 case SDL_KEYDOWN:
                 //case SDL_KEYUP:
                 {
-                    SDL_KeyboardEvent& key = Event.key;
+                    SDL_KeyboardEvent& Key = Event.key;
                     // If we press something other than tab, we need a
                     // new autocomplete list
-                    if(key.keysym.sym != SDLK_TAB)
+                    if(Key.keysym.sym != SDLK_TAB)
                     {
                         RequestNewAutoComplete = true;
                     }
                     
-                    if(key.keysym.sym == SDLK_ESCAPE)
+                    if(Key.keysym.sym == SDLK_ESCAPE)
                     {
                         Running = false;
                     }
-                    
-                    // TODO(Naor): Later on, move this into the panel
-                    // so it will handle it by its own.
-                    if(key.keysym.sym == SDLK_TAB)
+                    else if(Key.keysym.sym == SDLK_TAB)
                     {
                         CurrentPanel->GetAutoComplete();
                     }
-                    else if(key.keysym.sym > 0 && key.keysym.sym < MAX_CHARACTERS_TO_LOAD)
+                    else if(Key.keysym.sym == SDLK_BACKSPACE)
                     {
-                        char CharPressed = (char)key.keysym.sym;
-                        
-                        CurrentPanel->KeyPressed(CharPressed);
+                        CurrentPanel->Backspace();
                     }
+                    
+                }break;
+                
+                case SDL_TEXTINPUT:
+                {
+                    CurrentPanel->AppendText(Event.text.text);
+                }break;
+                
+                case SDL_TEXTEDITING:
+                {
+                    SDL_TextEditingEvent& Edit = Event.edit;
                 }break;
                 
                 case SDL_QUIT:

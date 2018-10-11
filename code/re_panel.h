@@ -9,44 +9,35 @@ struct panel
 {
     text_buffer* TextBuffer;
     
-    // TODO(Naor): For now we use KMOD from SDL, maybe move
-    // that to our own enum
-    void KeyPressed(char CharPressed, int32 Mod = KMOD_NONE)
+    // TODO(Naor): We need the current modifiers state so we can
+    // manipulate the text more appropriately.
+    void AppendText(char Text[32])
     {
-        if(CharPressed == SDLK_BACKSPACE)
+        while(*Text)
         {
-            if(TextBuffer->Size > 0)
+            if(*Text > 0 && *Text < 128)
             {
-                *(--TextBuffer->BufferEnd) = 0;
-                TextBuffer->Size--;
+                
+                if(*Text == ' ' || *Text == '\r')
+                {
+                    TextBuffer->AddAutoComplete();
+                }
+                
+                // TODO(Naor): This might overflow!
+                *TextBuffer->BufferEnd++ = *Text;
+                TextBuffer->Size++;
             }
+            
+            Text++;
         }
-        else
+    }
+    
+    void Backspace()
+    {
+        if(TextBuffer->Size > 0)
         {
-            
-            if(CharPressed == ' ' || CharPressed == '\r')
-            {
-                TextBuffer->AddAutoComplete();
-            }
-            
-            // TODO(Naor): Handle capslock
-            if(Mod & KMOD_SHIFT)
-            {
-                if(CharPressed >= 'a' && CharPressed <= 'z')
-                {
-                    // TODO(Naor): Make this compile time number.
-                    CharPressed -= 'a' - 'A'; 
-                }
-                else if(CharPressed >= 'A' && CharPressed <= 'Z')
-                {
-                    // TODO(Naor): Make this compile time number.
-                    CharPressed += 'a' - 'A'; 
-                }
-            }
-            
-            // TODO(Naor): This might overflow!
-            *TextBuffer->BufferEnd++ = CharPressed;
-            TextBuffer->Size++;
+            *(--TextBuffer->BufferEnd) = 0;
+            TextBuffer->Size--;
         }
     }
     

@@ -14,7 +14,7 @@ struct fill_memory_static
     // NOTE(Naor): SizeInit is number of elements in the block
     inline void Initialize(size_t SizeInit)
     {
-        Block = (type*)Platform.AllocateMemory(SizeInit * sizeof(type));
+        Block = static_cast<type*>(Platform.AllocateMemory(SizeInit * sizeof(type)));
         Size = 0;
         End = Block;
     }
@@ -39,7 +39,7 @@ struct fill_memory_static
     
     // NOTE(Naor): This will COPY the element into the block (using copy-ctor
     // if there is one).
-    inline type* Add(type Element)
+    inline type* Add(const type& Element)
     {
         Size++;
         

@@ -11,79 +11,55 @@
 #include "re_math.h"
 #include "re_platform.h"
 #include "re_memory.h"
+#include "re_opengl.h"
 #include "re_utility.h"
+#include "re_renderer.h"
 #include "re_autocomplete.h"
 
 // TODO(Naor): Move all these globals above #include "text_buffer.h" to
 // a struct or another place. this is temporary place for them
 // just to make everything work until I refactor the code.
-
 static constexpr int32 MAX_CHARACTERS_TO_LOAD = 128;
 static constexpr int32 MAX_TEXT_BUFFER = 1028;
 
-static auto_complete_tree AutoComplete;
-static bool RequestNewAutoComplete;
-static std::vector<std::string> LastCompletedWords;
-static int32 LastCompletedWordsIndex;
-static std::string LastSearchedWord;
+static auto_complete_tree g_AutoComplete;
+static bool g_RequestNewAutoComplete;
+static std::vector<std::string> g_LastCompletedWords;
+static int32 g_LastCompletedWordsIndex;
+static std::string g_LastSearchedWord;
 
-static uint32 Vao;
-static uint32 Vbo;
-static uint32 ShaderProgram;
-static FT_Library FontLibrary;
-static FT_Face FontFace;
+static uint32 g_Vao;
+static uint32 g_Vbo;
+static uint32 g_ShaderProgram;
+static FT_Library g_FontLibrary;
+static FT_Face g_FontFace;
 
-static float MaxFontHeight;
+static float g_MaxFontHeight;
+static float g_MaxFontWidth;
 
-static int32 DrawableWidth;
-static int32 DrawableHeight;
+static int32 g_DrawableWidth;
+static int32 g_DrawableHeight;
+
+static m4 g_Projection;
 
 // TODO(Naor): Do we really want it to be unordered_map? 
 // maybe we want to access it with an index because all the characters
 // going to be known at runtime, we just convert them to an index
 // and check if they are in the correct range.
-static std::unordered_map<char, character> Characters;
-
+static std::unordered_map<char, character> g_Characters;
 
 #include "re_text_buffer.h"
 #include "re_panel.h"
 
-static bool Running;
-static bool ShouldRender;
+static bool g_Running;
+static bool g_ShouldRender;
 
 // NOTE(Naor): This is grabbed from the global scope (extern)
 platform_api Platform;
 
-static void CompileShaderProgram(const char* VertexSource, const char* FragmentSource)
-{
-    uint32 VertexShader = glCreateShader(GL_VERTEX_SHADER);
-    uint32 FragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
-    
-    glShaderSource(VertexShader, 1, &VertexSource, NULL);
-    glCompileShader(VertexShader);
-    glShaderSource(FragmentShader, 1, &FragmentSource, NULL);
-    glCompileShader(FragmentShader);
-    
-    ShaderProgram = glCreateProgram();
-    glAttachShader(ShaderProgram, VertexShader);
-    glAttachShader(ShaderProgram, FragmentShader);
-    glLinkProgram(ShaderProgram);
-    
-    int32 Success;
-    glGetProgramiv(ShaderProgram, GL_LINK_STATUS, &Success);
-    if(!Success) {
-        char Buffer[256];
-        glGetProgramInfoLog(ShaderProgram, 512, NULL, Buffer);
-        OutputDebugString(Buffer);
-    }
-    
-    glDeleteShader(VertexShader);
-    glDeleteShader(FragmentShader);
-}
-
 static void InitializeSimpleText()
 {
-    int32 Error = FT_Init_FreeType(&FontLibrary);
+    int32 Error = FT_Init_FreeType(&g_FontLibrary);
     if(Error == 0)
     {
         // NOTE(Naor): If we already loaded the font to memory,
@@ -92,12 +68,12 @@ static void InitializeSimpleText()
         // NOTE(Naor): To know how many faces a given font file contains,
         // set face_index to -1, then check the value of face->num_faces,
         // which indicates how many faces are embedded in the font file.
-        Error = FT_New_Face(FontLibrary, "OpenSans-Regular.ttf", 0, &FontFace);
+        Error = FT_New_Face(g_FontLibrary, "OpenSans-Regular.ttf", 0, &g_FontFace);
         if(Error == 0)
         {
             // NOTE(Naor): Or use FT_Set_Char_Size
             Error = FT_Set_Pixel_Sizes(
-                FontFace,   /* handle to face object */
+                g_FontFace,   /* handle to face object */
                 0,      /* pixel_width           */
                 18);   /* pixel_height          */
             
@@ -109,7 +85,7 @@ static void InitializeSimpleText()
                 Char < MAX_CHARACTERS_TO_LOAD;
                 ++Char)
             {
-                if(FT_Load_Char(FontFace, Char, FT_LOAD_RENDER) != 0)
+                if(FT_Load_Char(g_FontFace, Char, FT_LOAD_RENDER) != 0)
                 {
                     OutputDebugString("Failed loading char\n");
                     continue;
@@ -122,12 +98,12 @@ static void InitializeSimpleText()
                     GL_TEXTURE_2D,
                     0,
                     GL_RED,
-                    FontFace->glyph->bitmap.width,
-                    FontFace->glyph->bitmap.rows,
+                    g_FontFace->glyph->bitmap.width,
+                    g_FontFace->glyph->bitmap.rows,
                     0, 
                     GL_RED,
                     GL_UNSIGNED_BYTE,
-                    FontFace->glyph->bitmap.buffer
+                    g_FontFace->glyph->bitmap.buffer
                     );
                 
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -137,14 +113,16 @@ static void InitializeSimpleText()
                 
                 character Character;
                 Character.TextureID = Texture;
-                Character.Size = {(int32)FontFace->glyph->bitmap.width, (int32)FontFace->glyph->bitmap.rows};
-                Character.Bearing = {FontFace->glyph->bitmap_left, FontFace->glyph->bitmap_top};
-                Character.Advance = FontFace->glyph->advance.x;
+                Character.Size = {static_cast<int32>(g_FontFace->glyph->bitmap.width), static_cast<int32>(g_FontFace->glyph->bitmap.rows)};
+                Character.Bearing = {g_FontFace->glyph->bitmap_left, g_FontFace->glyph->bitmap_top};
+                Character.Advance = g_FontFace->glyph->advance.x;
                 
-                if((float)Character.Size.Y > MaxFontHeight)
-                    MaxFontHeight = (float)Character.Size.Y;
+                if(static_cast<float>(Character.Size.Y) > g_MaxFontHeight)
+                    g_MaxFontHeight = static_cast<float>(Character.Size.Y);
+                if(static_cast<float>(Character.Size.X) > g_MaxFontWidth)
+                    g_MaxFontWidth = static_cast<float>(Character.Size.X);
                 
-                Characters.insert(std::pair<char, character>((char)Char, Character));
+                g_Characters.insert(std::pair<char, character>((char)Char, Character));
             }
             
             // Loading the shaders
@@ -173,27 +151,25 @@ static void InitializeSimpleText()
                 "Color = vec4(0.56, 0.69, 0.5, 1.0) * Sampled;\n"
                 "}  \n";
             
-            CompileShaderProgram(VertexSource, FragmentSource);
+            g_ShaderProgram = CompileShaderProgram(VertexSource, FragmentSource);
             
-            glUseProgram(ShaderProgram);
-            // TODO(Naor): Change the resolution based on the window size(?)
-            m4 Projection = OrthographicProjection(0.0f, 800.0f, 0.0f, 600.0f);
-            glUniformMatrix4fv(glGetUniformLocation(ShaderProgram, "Projection"), 1, GL_FALSE, Projection.E[0]);
+            glUseProgram(g_ShaderProgram);
+            g_Projection = math::OrthographicProjection(0.0f, static_cast<float>(g_DrawableWidth), 0.0f, static_cast<float>(g_DrawableHeight)); 
+            glUniformMatrix4fv(glGetUniformLocation(g_ShaderProgram, "Projection"), 1, GL_FALSE, g_Projection.E[0]);
             
             // NOTE(Naor): We want to enable blending because we have 
             // to draw quads for the text.
             glEnable(GL_BLEND);
             glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
             
-            glGenVertexArrays(1, &Vao);
-            glGenBuffers(1, &Vbo);
-            glBindVertexArray(Vao);
-            glBindBuffer(GL_ARRAY_BUFFER, Vbo);
+            glGenVertexArrays(1, &g_Vao);
+            glGenBuffers(1, &g_Vbo);
+            glBindVertexArray(g_Vao);
+            glBindBuffer(GL_ARRAY_BUFFER, g_Vbo);
             // The quad
             glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 6 * 4, nullptr, GL_DYNAMIC_DRAW);
             glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 4 * sizeof(float), 0);
             glEnableVertexAttribArray(0);
-            
         }
         else
         {
@@ -208,7 +184,7 @@ static void InitializeSimpleText()
     // TODO(Naor): Do we really want to tell FreeType that we are done with it?
     // maybe we would like to load fonts on the fly and reloading it would be a waste.
     // (We will probably wont be loading fonts that often so maybe we should free it)
-    FT_Done_Face(FontFace);
+    FT_Done_Face(g_FontFace);
 }
 
 // TODO(Naor): Those are really simple allocations for now,
@@ -281,7 +257,7 @@ bool32 Win32InitializeWindowAndOpenGL(SDL_Window** Window)
         return 1;
     }
     
-    SDL_GL_GetDrawableSize(*Window, &DrawableWidth, &DrawableHeight);
+    SDL_GL_GetDrawableSize(*Window, &g_DrawableWidth, &g_DrawableHeight);
     
     return 0;
 }
@@ -299,7 +275,8 @@ int main(int argc, char* argv[])
     
     InitializeSimpleText();
     
-    AutoComplete.Initialize();
+    g_AutoComplete.Initialize();
+    renderer::Initialize(g_Projection);
     
     std::vector<panel*> Panels;
     panel* CurrentPanel;
@@ -314,16 +291,16 @@ int main(int argc, char* argv[])
     // new text buffers
     text_buffer* TextBuffer = new text_buffer;
     TextBuffer->Initialize();
-    CurrentPanel->TextBuffer = TextBuffer;
+    CurrentPanel->Attach(TextBuffer);
     
-    Running = true;
-    ShouldRender = true;
-    while(Running)
+    g_Running = true;
+    g_ShouldRender = true;
+    while(g_Running)
     {
         SDL_Event Event;
         while (SDL_PollEvent(&Event)) 
         {
-            ShouldRender = true;
+            g_ShouldRender = true;
             switch(Event.type)
             {
                 case SDL_KEYDOWN:
@@ -334,22 +311,17 @@ int main(int argc, char* argv[])
                     // new autocomplete list
                     if(Key.keysym.sym != SDLK_TAB)
                     {
-                        RequestNewAutoComplete = true;
+                        g_RequestNewAutoComplete = true;
                     }
                     
                     if(Key.keysym.sym == SDLK_ESCAPE)
                     {
-                        Running = false;
+                        g_Running = false;
                     }
-                    else if(Key.keysym.sym == SDLK_TAB)
+                    else
                     {
-                        CurrentPanel->GetAutoComplete();
+                        CurrentPanel->OtherKeyPress(Key.keysym.sym);
                     }
-                    else if(Key.keysym.sym == SDLK_BACKSPACE)
-                    {
-                        CurrentPanel->Backspace();
-                    }
-                    
                 }break;
                 
                 case SDL_TEXTINPUT:
@@ -362,21 +334,40 @@ int main(int argc, char* argv[])
                     SDL_TextEditingEvent& Edit = Event.edit;
                 }break;
                 
+                case SDL_WINDOWEVENT:
+                {
+                    if(Event.window.event == SDL_WINDOWEVENT_RESIZED)
+                    {
+                        SDL_GL_GetDrawableSize(Window, &g_DrawableWidth, &g_DrawableHeight);
+                        glViewport(0, 0, static_cast<int32>(g_DrawableWidth), static_cast<int32>(g_DrawableHeight));
+                        
+                        g_Projection = math::OrthographicProjection(0.0f, static_cast<float>(g_DrawableWidth), 0.0f, static_cast<float>(g_DrawableHeight));
+                        renderer::UpdateProjection(g_Projection);
+                        
+                        // TODO(Naor): Move this into the renderer
+                        glUseProgram(g_ShaderProgram);
+                        glUniformMatrix4fv(glGetUniformLocation(g_ShaderProgram, "Projection"), 1, GL_FALSE, g_Projection.E[0]);
+                    }
+                }break;
+                
                 case SDL_QUIT:
                 {
-                    Running = false;
+                    g_Running = false;
                 }break;
             }
         }
         
-        if(ShouldRender)
+        if(g_ShouldRender)
         {
-            ShouldRender = false;
+            g_ShouldRender = false;
             
             // TODO(Naor): We might want to render everything instead of just the current panel,
             // for example, if two panels have the same text_buffer, and one panel is changing
             // the buffer, we want to rerender both of them. (maybe render based on the text_buffer)
             CurrentPanel->Render();
+            
+            OutputDebugString(CurrentPanel->TextBuffer->Buffer);
+            OutputDebugString("\n------------------\n");
             
             SDL_GL_SwapWindow(Window);
         }

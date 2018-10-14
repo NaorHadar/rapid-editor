@@ -16,12 +16,34 @@ struct ivec2
     int32 Y;
 };
 
+struct vec2
+{
+    union
+    {
+        struct
+        {
+            float X;
+            float Y;
+        };
+        
+        float E[2];
+    };
+};
+
 struct vec4
 {
-    float X;
-    float Y;
-    float Z;
-    float W;
+    union
+    {
+        struct
+        {
+            float X;
+            float Y;
+            float Z;
+            float W;
+        };
+        
+        float E[4];
+    };
 };
 
 struct m4

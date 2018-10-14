@@ -5,9 +5,13 @@ static constexpr int32 DEFAULT_BUFFER_SIZE = 65536;
 // TODO(Naor): Maybe find a better name for this
 struct text_buffer
 {
+    // TODO(Naor): Change the buffers, they may overflow at some point.
     char* Buffer;
     char* BufferEnd;
-    char* BufferPointer;
+    // NOTE(Naor): LastBufferPointer is used for knowning where was the pointer
+    // at, if we open this text_buffer with another panel, it will set the pointer
+    // to the last set pointer (LastBufferPointer)
+    char* LastBufferPointer;
     int32 Size;
     
     inline void Initialize(int32 BufferSize = DEFAULT_BUFFER_SIZE)
@@ -21,15 +25,13 @@ struct text_buffer
         // the memory might overflow.
         Buffer = (char*)Platform.AllocateMemory(BufferSize);
         BufferEnd = Buffer;
-        BufferPointer = Buffer;
+        LastBufferPointer = Buffer;
         Size = 0;
     }
     
     std::string GetWord()
     {
         std::string Result;
-        // TODO(Naor): Change BufferEnd to BufferPointer after
-        // we set the BufferPointer to the appropriate place.
         char* Scan = BufferEnd;
         
         // Find the beginning of the word
@@ -51,6 +53,6 @@ struct text_buffer
     {
         std::string NewWord = GetWord();
         
-        AutoComplete.Add(NewWord);
+        g_AutoComplete.Add(NewWord);
     }
 };
